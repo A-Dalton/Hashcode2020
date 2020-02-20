@@ -16,6 +16,8 @@ namespace Hashcode2k20
         /// </summary>
         public Dictionary<int, int> BookWithScore { get; set; } = new Dictionary<int, int>();
 
+        public bool PriorizizeScore { get; set; }
+
         public Library[] Libraries { get; set; }
     }
 
@@ -31,6 +33,9 @@ namespace Hashcode2k20
         public long ScoreOfAllBooks { get; set; }
 
         // Some kind of priority? / Related To "NumberOfShipmentsPossiblePerDay" + "NumberOfDaysForSignup"
+
+        // Total days it would take from Signup to scanning all the books
+        // x.NumberOfDaysForSignup + (x.NumberOfBooksInLibrary / x.NumberOfShipmentsPossiblePerDay)
     }
 
     class LibraryOutput
@@ -69,8 +74,10 @@ namespace Hashcode2k20
 
             // Data filling from line 2
             int i = 0;
-            foreach (int bookId in inputFileContents[1].Split(' ').Select(x => int.Parse(x)))
-                _input.BookWithScore.Add(i++, bookId);
+            foreach (int score in inputFileContents[1].Split(' ').Select(x => int.Parse(x)))
+                _input.BookWithScore.Add(i++, score);
+
+            // _input.PriorizizeScore = _input.BookWithScore.Values.Distinct().Count() > (_input.NumberOfDifferentBooks / 100);
 
             // Data filling of libraries starting from line 3
             int iLine = 2; // Current line in input file
@@ -91,50 +98,55 @@ namespace Hashcode2k20
         }
 
         /// <summary>
-        /// GOAL: Order as many slices as possible, but not more than the maximum number
+        /// GOAL: Scan as many books as possible - with the highest score possible
         /// </summary>
         public string Process()
         {
             // Track already used books
             HashSet<int> usedBooksIds = new HashSet<int>();
 
-            // Try some sort of order where to start
+            // Track the total score of all books available in the library
             foreach (Library l in _input.Libraries)
                 l.ScoreOfAllBooks = _input.BookWithScore.Where(x => l.IdsOfBooksInLibrary.Contains(x.Key)).Sum(x => x.Value);
+
+            // IDEA: Get books with the highest score + filter out duplicates in many libraries?
+            // _input.BookWithScore.OrderByDescending(x => x.Value);
 
             int totalSignUpDayCounter = 0;
             var librariesToUse = new List<LibraryOutput>();
 
-            // First off - only handle the sign-up process for the libraries - try to have the better libraries at first
-            foreach (Library l in _input.Libraries.OrderByDescending(x => x.ScoreOfAllBooks).OrderBy(x => x.NumberOfDaysForSignup))
+            // ORDER CONSIDERATIONS - when chosing which library to use first
+            // ##############################################################
+            //   1. Colliding Books in library (eg. almost no books to scan, because those have been used before)
+            //   2. Books-Score in library
+
+
+            var libOrder = _input.Libraries.OrderByDescending(x => x.ScoreOfAllBooks).OrderBy(x => (x.NumberOfDaysForSignup + (x.NumberOfBooksInLibrary / x.NumberOfShipmentsPossiblePerDay)));
+
+            // STEP 1: Create order of libraries to sign-up first
+            foreach (Library l in libOrder)
             {
                 if (totalSignUpDayCounter > _input.NumberOfMaxDays)
                     break;
 
                 // Entry for the output file
-                librariesToUse.Add(new LibraryOutput() { Lib = l, LibraryId = l.LibraryId, BookIdsToScan = new List<int>(), SignedUpOnDay = totalSignUpDayCounter, CurrentShippingDay = totalSignUpDayCounter });
+                librariesToUse.Add(new LibraryOutput() { Lib = l, LibraryId = l.LibraryId, BookIdsToScan = new List<int>(), SignedUpOnDay = totalSignUpDayCounter, CurrentShippingDay = (totalSignUpDayCounter + l.NumberOfDaysForSignup + 1) });
 
                 totalSignUpDayCounter += l.NumberOfDaysForSignup + 1; // +1 as the next library can start on the next day
             }
 
             // Within the library, scan as much books as possible
+            List<LibraryOutput> zeroBooks = new List<LibraryOutput>();
             foreach (var l in librariesToUse)
             {
-                int dayCounter = 0;
-
-                if (l.CurrentShippingDay > _input.NumberOfMaxDays)
-                    break;
-
-                dayCounter += l.Lib.NumberOfShipmentsPossiblePerDay;
-
-                int currentyDayProcessingCounter = 0;
                 // Books with the highest score first :)
+                int booksPerDayCounter = 0;
                 foreach (var bookId in l.Lib.IdsOfBooksInLibrary.Where(x => !usedBooksIds.Contains(x)).OrderByDescending(x => _input.BookWithScore[x]))
                 {
-                    if (currentyDayProcessingCounter == l.Lib.NumberOfShipmentsPossiblePerDay)
+                    if (booksPerDayCounter == l.Lib.NumberOfShipmentsPossiblePerDay)
                     {
-                        l.CurrentShippingDay++;
-                        currentyDayProcessingCounter = 0;
+                        l.CurrentShippingDay++; // Ship the next book the next day
+                        booksPerDayCounter = 0; // Start again with book 0 that day
                     }
 
                     if (l.CurrentShippingDay > _input.NumberOfMaxDays)
@@ -142,8 +154,17 @@ namespace Hashcode2k20
 
                     l.BookIdsToScan.Add(bookId);
                     usedBooksIds.Add(bookId);
+
+                    booksPerDayCounter++;
                 }
+
+                // Manually remove libraries with no books to scan...
+                if (l.BookIdsToScan.Count == 0)
+                    zeroBooks.Add(l);
             }
+
+            foreach (var l in zeroBooks)
+                librariesToUse.Remove(l);
 
             // Line 1:                      Single integer (number of libraries to sign up)
             // Line 2 / 4 / 6 ... :         Id of library + Number of books from library
