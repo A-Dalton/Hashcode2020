@@ -1,2 +1,2 @@
-# Hashcode2020
-Project for Google Hash Code 2020
+# Google Hash Code 2020  - Team Project (C# Part)
+Project from the **Ü30Coding** team to solve the Google Hash Code 2020 challenge
